@@ -45,4 +45,9 @@
         <field name="key">product_price_change_digest.excluded_warehouses</field>
         <field name="value">ARIZA</field>
     </record>
+    <!-- Temizlik: kaç günden eski FD/FD-LINK aksiyonları ve CSV ekleri silinsin (min 7). -->
+    <record id="pcd_cleanup_retention" model="ir.config_parameter">
+        <field name="key">product_price_change_digest.cleanup_retention_days</field>
+        <field name="value">30</field>
+    </record>
 </odoo>
