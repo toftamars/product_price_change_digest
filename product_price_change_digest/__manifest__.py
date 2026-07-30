@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 {
     'name': 'Fiyat Değişim Bildirimi',
-    'version': '15.0.10.0.0',
+    'version': '15.0.11.0.0',
     'category': 'Inventory/Reporting',
     'summary': 'Fiyatı değişen ürünleri gün içinde belirli saat dilimlerinde e-posta ile bildirir',
     'description': """
@@ -23,6 +23,7 @@ Mevcut "otomatik işlem + planlanmış işlem" ikilisinin yerini alır.
     'website': 'https://zuhalmuzik.com',
     'depends': ['product', 'stock', 'mail'],
     'data': [
+        'security/ir.model.access.csv',
         'data/ir_config_parameter.xml',
         'data/ir_cron.xml',
         'views/res_config_settings_views.xml',
