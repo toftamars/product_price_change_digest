@@ -5,8 +5,9 @@ from odoo import fields, models
 class ResConfigSettings(models.TransientModel):
     _inherit = 'res.config.settings'
 
-    pcd_enabled = fields.Boolean(
-        string='Bildirim Aktif',
+    pcd_enabled = fields.Selection(
+        [('0', 'Kapalı'), ('1', 'Açık')],
+        string='Bildirim Sistemi', default='0',
         config_parameter='product_price_change_digest.enabled')
     pcd_slots = fields.Char(
         string='Gönderim Saatleri',
@@ -27,10 +28,11 @@ class ResConfigSettings(models.TransientModel):
         config_parameter='product_price_change_digest.test_recipient',
         help='DOLU ise mail SADECE buraya gider; gerçek liste devre dışı kalır. '
              'Canlıya geçerken BOŞALTIN.')
-    pcd_allow_real_send = fields.Boolean(
-        string='Gerçek Gönderime İzin Ver',
+    pcd_allow_real_send = fields.Selection(
+        [('0', 'Hayır (sadece test)'), ('1', 'Evet (gerçek listeye gönder)')],
+        string='Gerçek Gönderim', default='0',
         config_parameter='product_price_change_digest.allow_real_send',
-        help='Gerçek alıcı listesine göndermek için AÇIK olmalı (ve test alıcısı boş).')
+        help='Gerçek alıcı listesine göndermek için "Evet" olmalı (ve test alıcısı boş).')
     pcd_sender = fields.Char(
         string='Gönderen',
         config_parameter='product_price_change_digest.sender')

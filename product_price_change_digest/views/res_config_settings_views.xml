@@ -11,21 +11,17 @@
                     <h2>Fiyat Değişim Bildirimi</h2>
                     <div class="row mt16 o_settings_container">
                         <div class="col-12 col-lg-6 o_setting_box">
-                            <div class="o_setting_left_pane">
-                                <field name="pcd_enabled"/>
-                            </div>
                             <div class="o_setting_right_pane">
                                 <label for="pcd_enabled"/>
                                 <div class="text-muted">Bildirim sistemini aç/kapat.</div>
+                                <field name="pcd_enabled"/>
                             </div>
                         </div>
                         <div class="col-12 col-lg-6 o_setting_box">
-                            <div class="o_setting_left_pane">
-                                <field name="pcd_allow_real_send"/>
-                            </div>
                             <div class="o_setting_right_pane">
                                 <label for="pcd_allow_real_send"/>
-                                <div class="text-muted">Gerçek listeye göndermek için açık olmalı (test alıcısı boş iken).</div>
+                                <div class="text-muted">Gerçek listeye göndermek için "Evet" (test alıcısı boş iken).</div>
+                                <field name="pcd_allow_real_send"/>
                             </div>
                         </div>
                     </div>
