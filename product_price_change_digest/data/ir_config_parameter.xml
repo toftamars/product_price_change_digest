@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo noupdate="1">
+    <!-- Ana açma/kapama. Varsayılan KAPALI: kurulunca kendiliğinden mail atmaz. -->
+    <record id="pcd_enabled" model="ir.config_parameter">
+        <field name="key">product_price_change_digest.enabled</field>
+        <field name="value">0</field>
+    </record>
+    <!-- Test alıcısı. DOLU ise mail SADECE buraya gider (gerçek liste devre dışı). -->
+    <record id="pcd_test_recipient" model="ir.config_parameter">
+        <field name="key">product_price_change_digest.test_recipient</field>
+        <field name="value"></field>
+    </record>
+    <!-- Gerçek 60 kişiye gönderim için '1' olması ZORUNLU (ve test_recipient boş olmalı). -->
+    <record id="pcd_allow_real_send" model="ir.config_parameter">
+        <field name="key">product_price_change_digest.allow_real_send</field>
+        <field name="value">0</field>
+    </record>
+    <!-- Gerçek alıcı listesi (virgülle). Devreye alırken doldurulacak. -->
+    <record id="pcd_recipients" model="ir.config_parameter">
+        <field name="key">product_price_change_digest.recipients</field>
+        <field name="value"></field>
+    </record>
+    <record id="pcd_sender" model="ir.config_parameter">
+        <field name="key">product_price_change_digest.sender</field>
+        <field name="value">info@zuhalmuzik.com</field>
+    </record>
+    <record id="pcd_threshold" model="ir.config_parameter">
+        <field name="key">product_price_change_digest.price_threshold</field>
+        <field name="value">20</field>
+    </record>
+    <record id="pcd_slots" model="ir.config_parameter">
+        <field name="key">product_price_change_digest.slots</field>
+        <field name="value">11:00,15:00,18:00,21:00</field>
+    </record>
+    <record id="pcd_window" model="ir.config_parameter">
+        <field name="key">product_price_change_digest.window_min</field>
+        <field name="value">10</field>
+    </record>
+    <record id="pcd_tz" model="ir.config_parameter">
+        <field name="key">product_price_change_digest.tz</field>
+        <field name="value">Europe/Istanbul</field>
+    </record>
+    <!-- Mağaza olmayan depolar (virgülle, depo KODU). Varsayılan: ARIZA hariç. -->
+    <record id="pcd_excluded_wh" model="ir.config_parameter">
+        <field name="key">product_price_change_digest.excluded_warehouses</field>
+        <field name="value">ARIZA</field>
+    </record>
+</odoo>
