@@ -74,6 +74,13 @@ class ProductTemplate(models.Model):
         val = self.env['ir.config_parameter'].sudo().get_param(PARAM + key)
         return val if val not in (None, False, '') else default
 
+    @api.model
+    def _pcd_report_lang(self):
+        """Ürün adları HER ZAMAN bu dille okunur. Çeviri uyumsuzluğunda (base/İngilizce
+        ad bayat kalmış, TR ad güncel) cron kullanıcısının diline bağımlı kalmamak için
+        dili sabitler. Varsayılan tr_TR. Boş/None ise yine tr_TR."""
+        return (self._pcd_param('report_lang', 'tr_TR') or 'tr_TR').strip() or 'tr_TR'
+
     # ------------------------------------------------------------------
     # Satılabilir stok (Stok + Mağaza)
     # ------------------------------------------------------------------
@@ -94,7 +101,10 @@ class ProductTemplate(models.Model):
         Quant = self.env['stock.quant'].sudo()
         Product = self.env['product.product'].sudo()
         Warehouse = self.env['stock.warehouse'].sudo()
-        Template = self.env['product.template'].sudo()
+        # Ürün adlarını SABİT dille oku (çeviri uyumsuzluğu = bayat/yanlış/"(kopya)" ad).
+        # Buradan browse edilen kayıtlar mail + Excel'de kullanılacağı için isimler
+        # her zaman doğru dilde gelir; cron kullanıcısının diline bağlı değildir.
+        Template = self.env['product.template'].sudo().with_context(lang=self._pcd_report_lang())
         excluded = set(excluded_codes or [])
 
         if templates is None:

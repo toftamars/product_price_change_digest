@@ -27,6 +27,9 @@ class PriceChangeDigestConfig(models.TransientModel):
     display_limit = fields.Integer(string='Mailde Gösterilecek Maks Ürün',
                                    help='Mail gövdesinde en fazla ürün; tamamı Excel ekinde.')
     excluded_warehouses = fields.Char(string='Hariç Depolar (kod)', help='Virgülle, depo kodları. Örn: ARIZA')
+    report_lang = fields.Char(string='Rapor Dili (ürün adı)', default='tr_TR',
+                              help='Ürün adları mail ve Excel\'de HER ZAMAN bu dille okunur. '
+                                   'Çeviri uyumsuzluğunda yanlış/bayat/"(kopya)" ad çıkmasını önler. Örn: tr_TR')
     cleanup_retention_days = fields.Integer(string='Temizlik Saklama (gün)', default=30)
 
     @api.model
@@ -58,6 +61,7 @@ class PriceChangeDigestConfig(models.TransientModel):
             'price_threshold': gf('price_threshold', 20),
             'display_limit': gi('display_limit', 50),
             'excluded_warehouses': ICP.get_param(P + 'excluded_warehouses', 'ARIZA'),
+            'report_lang': ICP.get_param(P + 'report_lang', 'tr_TR'),
             'cleanup_retention_days': gi('cleanup_retention_days', 30),
         })
         return res
@@ -76,6 +80,7 @@ class PriceChangeDigestConfig(models.TransientModel):
         ICP.set_param(P + 'price_threshold', str(self.price_threshold or 20.0))
         ICP.set_param(P + 'display_limit', str(int(self.display_limit or 50)))
         ICP.set_param(P + 'excluded_warehouses', (self.excluded_warehouses or '').strip())
+        ICP.set_param(P + 'report_lang', (self.report_lang or 'tr_TR').strip() or 'tr_TR')
         ICP.set_param(P + 'cleanup_retention_days', str(int(self.cleanup_retention_days or 30)))
         return {
             'type': 'ir.actions.client',

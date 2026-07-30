@@ -29,6 +29,7 @@
                             <field name="price_threshold"/>
                             <field name="display_limit"/>
                             <field name="excluded_warehouses"/>
+                            <field name="report_lang"/>
                         </group>
                         <group string="Bakım">
                             <field name="cleanup_retention_days"/>

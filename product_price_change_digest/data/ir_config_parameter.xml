@@ -55,4 +55,9 @@
         <field name="key">product_price_change_digest.display_limit</field>
         <field name="value">50</field>
     </record>
+    <!-- Ürün adları bu dille okunur (çeviri uyumsuzluğuna karşı sabit). Varsayılan tr_TR. -->
+    <record id="pcd_report_lang" model="ir.config_parameter">
+        <field name="key">product_price_change_digest.report_lang</field>
+        <field name="value">tr_TR</field>
+    </record>
 </odoo>
