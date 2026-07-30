@@ -329,8 +329,13 @@ class ProductTemplate(models.Model):
             'email_to': recipients,
             'attachment_ids': [(6, 0, [attachment.id])],
         })
-        # Atomik: sadece gönderilen ürünlerin bayrağını temizle + işareti ilerlet (aynı transaction)
-        reported.write({'price_notify_pending': False})
+        # Atomik (aynı transaction): gönderilen ürünler + eşik-altı (raporlanmayacak,
+        # yoksa sonsuza dek 'bekliyor'da kalırlardı) bayrakları temizle; işareti ilerlet.
+        # Not: eşik üstü olup satılabilir stoğu OLMAYAN ürünler bilinçli olarak
+        # bekletilir (stok gelince bir sonraki slotta raporlansınlar).
+        below = Template.search([('price_notify_pending', '=', True),
+                                 ('list_price', '<', threshold)])
+        (reported | below).write({'price_notify_pending': False})
         ICP.set_param(PARAM + 'last_sent_slot', slot_key)
         _logger.info('[FiyatDigest] Slot %s: %s mağaza, %s ürün, alıcı=%s',
                      slot_key, len(wh_map), len(reported), recipients)
