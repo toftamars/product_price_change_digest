@@ -157,21 +157,41 @@ class ProductTemplate(models.Model):
         return None
 
     @api.model
+    def _pcd_normalize_emails(self, raw, exclude=None):
+        """Virgül/noktalı virgülle ayrılmış adresleri temizler: boşluk kırp,
+        boşları at, büyük/küçük harf duyarsız mükerrerleri tekille, exclude'daki
+        adresleri (ör. gönderen) çıkar. Sıra korunur."""
+        exclude = {e.strip().lower() for e in (exclude or []) if e and e.strip()}
+        seen, result = set(), []
+        for part in (raw or '').replace(';', ',').split(','):
+            e = part.strip()
+            if not e:
+                continue
+            key = e.lower()
+            if key in exclude or key in seen:
+                continue
+            seen.add(key)
+            result.append(e)
+        return ','.join(result)
+
+    @api.model
     def _pcd_resolve_recipients(self):
         """Alıcıyı çözer. SERT KİLİT: test_recipient ayarlıysa mail SADECE ona gider.
         Gerçek listeye gitmesi için allow_real_send='1' ve dolu recipients şart.
-        Belirsizse None (fail-closed)."""
+        Belirsizse None (fail-closed). Adresler dedupe edilir; gerçek listede
+        gönderen adresi alıcılardan çıkarılır."""
         test = (self._pcd_param('test_recipient', '') or '').strip()
         if test:
-            return test
+            return self._pcd_normalize_emails(test)
         if (self._pcd_param('allow_real_send', '0') or '0') != '1':
             _logger.warning('[FiyatDigest] Gerçek gönderim kapalı ve test_recipient yok; atlandı.')
             return None
-        real = (self._pcd_param('recipients', '') or '').strip()
-        if not real:
+        sender = (self._pcd_param('sender', 'info@zuhalmuzik.com') or '').strip()
+        clean = self._pcd_normalize_emails(self._pcd_param('recipients', ''), exclude=[sender])
+        if not clean:
             _logger.warning('[FiyatDigest] Alıcı listesi boş; atlandı.')
             return None
-        return real
+        return clean
 
     @api.model
     def _pcd_product_menu_id(self):
