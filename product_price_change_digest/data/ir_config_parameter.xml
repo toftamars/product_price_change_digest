@@ -50,4 +50,9 @@
         <field name="key">product_price_change_digest.cleanup_retention_days</field>
         <field name="value">30</field>
     </record>
+    <!-- Mail gövdesindeki genel listede en fazla kaç ürün gösterilsin (tamamı Excel'de). -->
+    <record id="pcd_display_limit" model="ir.config_parameter">
+        <field name="key">product_price_change_digest.display_limit</field>
+        <field name="value">50</field>
+    </record>
 </odoo>

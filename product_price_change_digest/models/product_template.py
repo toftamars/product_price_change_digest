@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import base64
+import io
 import logging
 from datetime import datetime
 
@@ -10,6 +11,14 @@ from odoo import api, fields, models
 _logger = logging.getLogger(__name__)
 
 PARAM = 'product_price_change_digest.'
+
+# Tasarım renkleri (Zuhal kırmızısı ağırlıklı, modern)
+C_PRIMARY = '#C8102E'
+C_DARK = '#111827'
+C_MUTED = '#6b7280'
+C_BORDER = '#e5e7eb'
+C_ZEBRA = '#fafafa'
+C_SOFT = '#fdecea'
 
 
 def _esc(s):
@@ -23,22 +32,17 @@ class ProductTemplate(models.Model):
 
     price_notify_pending = fields.Boolean(
         string='Fiyat Bildirimi Bekliyor',
-        default=False,
-        copy=False,
-        index=True,
+        default=False, copy=False, index=True,
         help='Satış fiyatı değişti ve henüz bildirim e-postasına dahil edilmedi. '
              'Slot gönderiminde e-posta atıldıktan sonra otomatik temizlenir.',
     )
 
     def write(self, vals):
-        # Fiyatı GERÇEKTEN değişen ürünleri, super() çağrısından ÖNCE tespit et.
         templates_to_flag = self.browse()
         if 'list_price' in vals:
             new_price = vals.get('list_price')
             templates_to_flag = self.filtered(lambda t: t.list_price != new_price)
-
         res = super().write(vals)
-
         if templates_to_flag:
             to_set = templates_to_flag.filtered(lambda t: not t.price_notify_pending)
             if to_set:
@@ -54,7 +58,7 @@ class ProductTemplate(models.Model):
         return val if val not in (None, False, '') else default
 
     # ------------------------------------------------------------------
-    # Görev 2: Satılabilir stok (Stok + Mağaza)
+    # Satılabilir stok (Stok + Mağaza)
     # ------------------------------------------------------------------
     def _price_digest_sellable_roots(self, warehouse):
         Location = self.env['stock.location'].sudo()
@@ -69,9 +73,6 @@ class ProductTemplate(models.Model):
         return roots
 
     def _price_digest_warehouse_stock(self, templates=None, excluded_codes=None):
-        """{ warehouse: templates } — her depoda Stok+Mağaza'da eldeki stoğu (>0)
-        olan, verilen (yoksa bekleyen) ürünler. excluded_codes'taki depolar atlanır.
-        SALT-OKUNUR."""
         Location = self.env['stock.location'].sudo()
         Quant = self.env['stock.quant'].sudo()
         Product = self.env['product.product'].sudo()
@@ -127,12 +128,10 @@ class ProductTemplate(models.Model):
                 for wid, tids in wh_to_tmpl_ids.items()}
 
     # ------------------------------------------------------------------
-    # Görev 3: Slot / zaman dilimi / alıcı / e-posta
+    # Slot / zaman dilimi
     # ------------------------------------------------------------------
     @api.model
     def _pcd_current_slot_key(self):
-        """Şu an bir slot penceresindeyse 'YYYYMMDD_HHMM' döndürür, değilse None.
-        Europe/Istanbul (pytz), sabit +3 yok."""
         try:
             tz = pytz.timezone(self._pcd_param('tz', 'Europe/Istanbul'))
         except Exception:
@@ -156,11 +155,11 @@ class ProductTemplate(models.Model):
                 return '%s_%02d%02d' % (now_ist.strftime('%Y%m%d'), hh, mm)
         return None
 
+    # ------------------------------------------------------------------
+    # Alıcılar (dedupe + gönderen çıkarma, sert kilit)
+    # ------------------------------------------------------------------
     @api.model
     def _pcd_normalize_emails(self, raw, exclude=None):
-        """Virgül/noktalı virgülle ayrılmış adresleri temizler: boşluk kırp,
-        boşları at, büyük/küçük harf duyarsız mükerrerleri tekille, exclude'daki
-        adresleri (ör. gönderen) çıkar. Sıra korunur."""
         exclude = {e.strip().lower() for e in (exclude or []) if e and e.strip()}
         seen, result = set(), []
         for part in (raw or '').replace(';', ',').split(','):
@@ -176,10 +175,6 @@ class ProductTemplate(models.Model):
 
     @api.model
     def _pcd_resolve_recipients(self):
-        """Alıcıyı çözer. SERT KİLİT: test_recipient ayarlıysa mail SADECE ona gider.
-        Gerçek listeye gitmesi için allow_real_send='1' ve dolu recipients şart.
-        Belirsizse None (fail-closed). Adresler dedupe edilir; gerçek listede
-        gönderen adresi alıcılardan çıkarılır."""
         test = (self._pcd_param('test_recipient', '') or '').strip()
         if test:
             return self._pcd_normalize_emails(test)
@@ -208,9 +203,65 @@ class ProductTemplate(models.Model):
                 or self.env['ir.ui.menu'].sudo().search([('name', 'ilike', 'Products')], limit=1))
         return menu.id if menu else False
 
+    # ------------------------------------------------------------------
+    # E-posta içeriği (genel maks-N liste + mağaza linkleri) + xlsx eki
+    # ------------------------------------------------------------------
+    def _pcd_collect(self, wh_map):
+        """wh_map -> (all_tmpls[sıralı], tmpl_stores{tmpl_id:[kod...]})"""
+        tmpl_set, tmpl_stores = {}, {}
+        for wh, tmpls in wh_map.items():
+            code = wh.code or wh.name or 'Depo'
+            for t in tmpls:
+                tmpl_set[t.id] = t
+                tmpl_stores.setdefault(t.id, set()).add(code)
+        all_tmpls = sorted(tmpl_set.values(), key=lambda t: (t.name or ''))
+        return all_tmpls, {k: sorted(v) for k, v in tmpl_stores.items()}
+
+    def _pcd_build_attachment(self, all_tmpls, tmpl_stores, now_ist):
+        """xlsx (mümkünse) yoksa csv. Tüm ürünlerin düz listesi."""
+        headers = ['Kod', 'Ürün', 'Yeni Fiyat', 'Para Birimi', 'Stoklu Mağazalar']
+        stamp = now_ist.strftime('%Y%m%d_%H%M')
+        try:
+            import xlsxwriter
+            buf = io.BytesIO()
+            wb = xlsxwriter.Workbook(buf, {'in_memory': True})
+            ws = wb.add_worksheet('Fiyat Değişiklikleri')
+            f_hdr = wb.add_format({'bold': True, 'font_color': '#FFFFFF', 'bg_color': C_PRIMARY,
+                                   'border': 1, 'align': 'left', 'valign': 'vcenter'})
+            f_cell = wb.add_format({'border': 1, 'valign': 'vcenter'})
+            f_price = wb.add_format({'border': 1, 'num_format': '#,##0.00', 'bold': True,
+                                     'font_color': C_PRIMARY, 'valign': 'vcenter'})
+            for c, h in enumerate(headers):
+                ws.write(0, c, h, f_hdr)
+            for c, w in enumerate([16, 52, 14, 12, 40]):
+                ws.set_column(c, c, w)
+            ws.set_row(0, 22)
+            r = 1
+            for t in all_tmpls:
+                ws.write(r, 0, t.default_code or '', f_cell)
+                ws.write(r, 1, t.name or '', f_cell)
+                ws.write(r, 2, t.list_price or 0.0, f_price)
+                ws.write(r, 3, 'TL', f_cell)
+                ws.write(r, 4, ', '.join(tmpl_stores.get(t.id, [])), f_cell)
+                r += 1
+            ws.freeze_panes(1, 0)
+            ws.autofilter(0, 0, max(r - 1, 1), len(headers) - 1)
+            wb.close()
+            return ('Fiyat_Degisiklikleri_%s.xlsx' % stamp, buf.getvalue(),
+                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        except Exception as e:
+            _logger.warning('[FiyatDigest] xlsx üretilemedi (%s), CSV kullanılıyor.', e)
+            lines = ['Kod,Urun,Yeni Fiyat,Para Birimi,Stoklu Magazalar']
+            for t in all_tmpls:
+                lines.append('"%s","%s",%.2f,TL,"%s"' % (
+                    (t.default_code or '').replace('"', '""'),
+                    (t.name or '').replace('"', '""'),
+                    t.list_price or 0.0,
+                    ', '.join(tmpl_stores.get(t.id, [])).replace('"', '""')))
+            return ('Fiyat_Degisiklikleri_%s.csv' % stamp,
+                    ('\n'.join(lines)).encode('utf-8-sig'), 'text/csv')
+
     def _pcd_build_digest(self, wh_map):
-        """wh_map: {warehouse: templates}. -> (subject, body_html, csv_bytes).
-        Liste, link ve CSV TEK kaynaktan (wh_map) üretilir → 'mailde var/linkte yok' olmaz."""
         ICP = self.env['ir.config_parameter'].sudo()
         base_url = ICP.get_param('web.base.url') or ''
         db = self.env.cr.dbname
@@ -220,70 +271,115 @@ class ProductTemplate(models.Model):
         except Exception:
             tz = pytz.timezone('Europe/Istanbul')
         now_ist = pytz.utc.localize(datetime.utcnow()).astimezone(tz)
+        try:
+            limit = int(self._pcd_param('display_limit', '50'))
+        except Exception:
+            limit = 50
 
-        sections = []
-        csv_lines = ['Magaza,Kod,Urun,Yeni Fiyat,Para Birimi']
-        for wh in sorted(wh_map.keys(), key=lambda w: (w.name or '')):
+        all_tmpls, tmpl_stores = self._pcd_collect(wh_map)
+        total = len(all_tmpls)
+
+        # --- Mağaza linkleri (her stoklu depo, tam liste) ---
+        links_html = ''
+        for wh in sorted(wh_map.keys(), key=lambda w: (w.code or w.name or '')):
             tmpls = wh_map[wh]
             if not tmpls:
                 continue
-            wh_label = wh.code or wh.name or 'Depo'
+            label = wh.code or wh.name or 'Depo'
             ids_csv = ','.join(str(i) for i in tmpls.ids)
             action = self.env['ir.actions.act_window'].sudo().create({
-                'name': 'FD %s' % wh_label,
-                'type': 'ir.actions.act_window',
-                'res_model': 'product.template',
-                'view_mode': 'tree,form',
-                'domain': "[('id','in',[%s])]" % ids_csv,
-                'target': 'current',
-            })
+                'name': 'FD %s' % label, 'type': 'ir.actions.act_window',
+                'res_model': 'product.template', 'view_mode': 'tree,form',
+                'domain': "[('id','in',[%s])]" % ids_csv, 'target': 'current'})
             link = '%s/web?db=%s#action=%s&model=product.template&view_type=list&menu_id=%s' % (
                 base_url, db, action.id, menu_id or '')
-            rows = []
-            for t in tmpls.sorted(lambda r: (r.name or '')):
-                rows.append(
-                    '<tr>'
-                    '<td style="padding:6px;border:1px solid #e5e7eb;">%s</td>'
-                    '<td style="padding:6px;border:1px solid #e5e7eb;">%s</td>'
-                    '<td style="padding:6px;border:1px solid #e5e7eb;text-align:right;">%.2f TL</td>'
-                    '</tr>' % (_esc(t.default_code), _esc(t.name), t.list_price or 0.0))
-                csv_lines.append('"%s","%s","%s",%.2f,TL' % (
-                    _esc(wh_label).replace('&amp;', '&'),
-                    (t.default_code or '').replace('"', '""'),
-                    (t.name or '').replace('"', '""'),
-                    t.list_price or 0.0))
-            sections.append(
-                '<div style="margin:18px 0;">'
-                '<div style="font-weight:bold;font-size:15px;color:#111827;margin-bottom:6px;">'
-                '%s <span style="color:#6b7280;font-weight:normal;">(%s ürün)</span></div>'
-                '<table style="border-collapse:collapse;width:100%%;font-size:13px;">'
-                '<thead><tr style="background:#f9fafb;">'
-                '<th style="padding:6px;border:1px solid #e5e7eb;text-align:left;">Kod</th>'
-                '<th style="padding:6px;border:1px solid #e5e7eb;text-align:left;">Ürün</th>'
-                '<th style="padding:6px;border:1px solid #e5e7eb;text-align:right;">Yeni Fiyat</th>'
-                '</tr></thead><tbody>%s</tbody></table>'
-                '<div style="margin-top:6px;">'
-                '<a href="%s" style="color:#2563eb;text-decoration:none;">Listeyi aç →</a></div>'
-                '</div>' % (_esc(wh_label), len(tmpls), ''.join(rows), link))
+            links_html += (
+                '<tr>'
+                '<td style="padding:8px 10px;border-bottom:1px solid %s;font-weight:bold;color:%s;">%s</td>'
+                '<td style="padding:8px 10px;border-bottom:1px solid %s;color:%s;">%s ürün</td>'
+                '<td style="padding:8px 10px;border-bottom:1px solid %s;text-align:right;">'
+                '<a href="%s" style="display:inline-block;background:%s;color:#fff;text-decoration:none;'
+                'padding:6px 14px;border-radius:6px;font-size:12px;font-weight:bold;">Listeyi aç</a>'
+                '</td></tr>'
+            ) % (C_BORDER, C_DARK, _esc(label), C_BORDER, C_MUTED, len(tmpls), C_BORDER, link, C_PRIMARY)
+
+        # --- Genel ürün listesi (maks limit) ---
+        shown = all_tmpls[:limit]
+        remaining = max(0, total - len(shown))
+        rows = ''
+        for idx, t in enumerate(shown):
+            bg = '#ffffff' if idx % 2 == 0 else C_ZEBRA
+            rows += (
+                '<tr style="background:%s;">'
+                '<td style="padding:8px 10px;border-bottom:1px solid %s;font-size:12px;color:%s;white-space:nowrap;">%s</td>'
+                '<td style="padding:8px 10px;border-bottom:1px solid %s;font-size:13px;">%s</td>'
+                '<td style="padding:8px 10px;border-bottom:1px solid %s;text-align:right;font-weight:bold;color:%s;white-space:nowrap;">%.2f TL</td>'
+                '</tr>'
+            ) % (bg, C_BORDER, C_MUTED, _esc(t.default_code), C_BORDER, _esc(t.name),
+                 C_BORDER, C_PRIMARY, t.list_price or 0.0)
+        remaining_html = ''
+        if remaining > 0:
+            remaining_html = (
+                '<div style="padding:10px 12px;background:%s;border-radius:8px;margin-top:10px;'
+                'font-size:13px;color:%s;">Bu maildeki listede ilk <b>%s</b> ürün gösterildi. '
+                'Kalan <b>%s</b> ürün için ekteki Excel dosyasına veya ilgili mağaza linklerine bakınız.</div>'
+            ) % (C_SOFT, C_DARK, len(shown), remaining)
 
         subject = 'Fiyat Değişim Bildirimi - %s' % now_ist.strftime('%Y-%m-%d %H:%M')
         body = (
-            '<div style="font-family:Arial,sans-serif;font-size:13px;max-width:760px;'
-            'margin:0 auto;color:#111827;line-height:1.4;">'
-            '<p>Merhaba,</p>'
-            '<p>Aşağıda, fiyatı değişen ve ilgili mağazada <b>satılabilir stoğu (Stok + Mağaza)</b> '
-            'olan ürünler mağaza bazında listelenmiştir. Her mağazanın listesi, altındaki '
-            '“Listeyi aç” bağlantısıyla birebir aynıdır.</p>'
-            '%s'
-            '<p style="margin-top:16px;"><strong>Etiket hatırlatması:</strong> Etiketleri '
-            'Fiyat Tespit Tarihi filtresini kullanarak güncelleyiniz.</p>'
-            '<p>İyi çalışmalar.</p>'
-            '</div>' % ''.join(sections))
-        return subject, body, ('\n'.join(csv_lines)).encode('utf-8-sig')
+            '<div style="background:#f3f4f6;padding:24px 0;font-family:Arial,Helvetica,sans-serif;">'
+            '<div style="max-width:720px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;'
+            'box-shadow:0 1px 4px rgba(0,0,0,0.08);">'
+            # header
+            '<div style="background:%s;padding:22px 28px;">'
+            '<div style="color:#fff;font-size:20px;font-weight:bold;letter-spacing:.3px;">Fiyat Değişim Bildirimi</div>'
+            '<div style="color:#ffd9de;font-size:13px;margin-top:4px;">%s</div>'
+            '</div>'
+            # body
+            '<div style="padding:24px 28px;color:%s;line-height:1.5;">'
+            '<p style="margin:0 0 14px 0;">Merhaba,</p>'
+            '<p style="margin:0 0 16px 0;font-size:13px;color:%s;">Fiyatı değişen ve satılabilir stoğu '
+            '(Stok + Mağaza) olan <b style="color:%s;">%s ürün</b>, <b style="color:%s;">%s mağazada</b> '
+            'stokta. Aşağıda genel liste, altında her mağazanın kendi tam listesine bağlantı vardır. '
+            'Tüm ürünlerin dökümü ekteki Excel dosyasındadır.</p>'
+            # general list
+            '<div style="font-weight:bold;font-size:14px;color:%s;margin:18px 0 8px 0;">Değişen Ürünler</div>'
+            '<table style="border-collapse:collapse;width:100%%;border:1px solid %s;border-radius:8px;overflow:hidden;">'
+            '<thead><tr style="background:%s;">'
+            '<th style="padding:10px;text-align:left;color:#fff;font-size:12px;">Kod</th>'
+            '<th style="padding:10px;text-align:left;color:#fff;font-size:12px;">Ürün</th>'
+            '<th style="padding:10px;text-align:right;color:#fff;font-size:12px;">Yeni Fiyat</th>'
+            '</tr></thead><tbody>%s</tbody></table>%s'
+            # store links
+            '<div style="font-weight:bold;font-size:14px;color:%s;margin:22px 0 8px 0;">Mağaza Listeleri</div>'
+            '<table style="border-collapse:collapse;width:100%%;border:1px solid %s;border-radius:8px;overflow:hidden;">'
+            '<tbody>%s</tbody></table>'
+            # reminder
+            '<div style="margin:22px 0 6px 0;padding:12px 14px;background:%s;border-left:4px solid %s;border-radius:6px;">'
+            '<b style="color:%s;">Etiket hatırlatması:</b> <span style="color:%s;font-size:13px;">Etiketleri '
+            'Fiyat Tespit Tarihi filtresini kullanarak güncelleyiniz.</span></div>'
+            '<p style="margin:16px 0 0 0;font-size:13px;color:%s;">İyi çalışmalar.</p>'
+            '</div>'
+            '<div style="padding:14px 28px;background:#fafafa;border-top:1px solid %s;font-size:11px;color:%s;">'
+            'Bu e-posta Zuhal Müzik fiyat değişim bildirim sistemi tarafından otomatik gönderilmiştir.</div>'
+            '</div></div>'
+        ) % (
+            C_PRIMARY, now_ist.strftime('%d.%m.%Y %H:%M'),
+            C_DARK, C_MUTED, C_PRIMARY, total, C_PRIMARY, len(wh_map),
+            C_DARK, C_BORDER, C_PRIMARY, rows, remaining_html,
+            C_DARK, C_BORDER, links_html,
+            C_SOFT, C_PRIMARY, C_PRIMARY, C_DARK, C_MUTED,
+            C_BORDER, C_MUTED,
+        )
 
+        att_name, att_bytes, att_mime = self._pcd_build_attachment(all_tmpls, tmpl_stores, now_ist)
+        return subject, body, att_name, att_bytes, att_mime
+
+    # ------------------------------------------------------------------
+    # Cron
+    # ------------------------------------------------------------------
     @api.model
     def _cron_send_price_change_digest(self):
-        """Slot gönderimi. Tüm güvenlik kilitleriyle. Varsayılan enabled=0 iken hiçbir şey yapmaz."""
         ICP = self.env['ir.config_parameter'].sudo()
         if (self._pcd_param('enabled', '0') or '0') != '1':
             return False
@@ -306,7 +402,7 @@ class ProductTemplate(models.Model):
         excluded = [c.strip() for c in (self._pcd_param('excluded_warehouses', 'ARIZA') or '').split(',') if c.strip()]
         wh_map = self._price_digest_warehouse_stock(templates=eligible, excluded_codes=excluded)
         if not wh_map:
-            return False  # satılabilir stok yok -> gönderme, bayrakları bekletmeye devam
+            return False
 
         recipients = self._pcd_resolve_recipients()
         if not recipients:
@@ -314,25 +410,19 @@ class ProductTemplate(models.Model):
 
         reported = Template.browse(sorted({t.id for tmpls in wh_map.values() for t in tmpls}))
         sender = self._pcd_param('sender', 'info@zuhalmuzik.com')
-        subject, body, csv_bytes = self._pcd_build_digest(wh_map)
+        subject, body, att_name, att_bytes, att_mime = self._pcd_build_digest(wh_map)
 
         attachment = self.env['ir.attachment'].sudo().create({
-            'name': 'Fiyat_Degisiklikleri_%s.csv' % slot_key,
-            'type': 'binary',
-            'datas': base64.b64encode(csv_bytes).decode('utf-8'),
-            'res_model': 'mail.mail', 'res_id': 0,
+            'name': att_name, 'type': 'binary',
+            'datas': base64.b64encode(att_bytes).decode('utf-8'),
+            'mimetype': att_mime, 'res_model': 'mail.mail', 'res_id': 0,
         })
         self.env['mail.mail'].sudo().create({
-            'subject': subject,
-            'body_html': body,
-            'email_from': sender,
-            'email_to': recipients,
+            'subject': subject, 'body_html': body,
+            'email_from': sender, 'email_to': recipients,
             'attachment_ids': [(6, 0, [attachment.id])],
         })
-        # Atomik (aynı transaction): gönderilen ürünler + eşik-altı (raporlanmayacak,
-        # yoksa sonsuza dek 'bekliyor'da kalırlardı) bayrakları temizle; işareti ilerlet.
-        # Not: eşik üstü olup satılabilir stoğu OLMAYAN ürünler bilinçli olarak
-        # bekletilir (stok gelince bir sonraki slotta raporlansınlar).
+        # Atomik: gönderilenler + eşik-altı bayrakları temizle; işareti ilerlet.
         below = Template.search([('price_notify_pending', '=', True),
                                  ('list_price', '<', threshold)])
         (reported | below).write({'price_notify_pending': False})
