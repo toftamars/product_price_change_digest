@@ -18,7 +18,7 @@ class ResConfigSettings(models.TransientModel):
     pcd_tz = fields.Char(
         string='Zaman Dilimi',
         config_parameter='product_price_change_digest.tz')
-    pcd_recipients = fields.Text(
+    pcd_recipients = fields.Char(
         string='Alıcılar (gerçek liste)',
         config_parameter='product_price_change_digest.recipients',
         help='Virgülle ayrılmış e-posta adresleri.')

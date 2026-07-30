@@ -36,17 +36,34 @@ class ProductTemplate(models.Model):
         help='Satış fiyatı değişti ve henüz bildirim e-postasına dahil edilmedi. '
              'Slot gönderiminde e-posta atıldıktan sonra otomatik temizlenir.',
     )
+    price_notify_old_price = fields.Float(
+        string='Bildirim Öncesi Fiyat', copy=False,
+        help='Bu bildirim turundaki ilk değişiklikten önceki satış fiyatı '
+             '(e-posta ve Excel ekinde Eski Fiyat olarak gösterilir).',
+    )
 
     def write(self, vals):
-        templates_to_flag = self.browse()
+        to_flag = self.browse()
+        old_map = {}
         if 'list_price' in vals:
             new_price = vals.get('list_price')
-            templates_to_flag = self.filtered(lambda t: t.list_price != new_price)
+            to_flag = self.filtered(lambda t: t.list_price != new_price)
+            # Yeni işaretlenecekler için değişiklik ÖNCESİ fiyatı sakla (baz fiyat).
+            for t in to_flag:
+                if not t.price_notify_pending:
+                    old_map[t.id] = t.list_price
         res = super().write(vals)
-        if templates_to_flag:
-            to_set = templates_to_flag.filtered(lambda t: not t.price_notify_pending)
-            if to_set:
-                super(ProductTemplate, to_set).write({'price_notify_pending': True})
+        if to_flag:
+            newly = to_flag.filtered(lambda t: not t.price_notify_pending)
+            if newly:
+                super(ProductTemplate, newly).write({'price_notify_pending': True})
+                # Eski fiyatı (aynı değere sahip olanları toplu) yaz.
+                by_val = {}
+                for t in newly:
+                    if t.id in old_map:
+                        by_val.setdefault(old_map[t.id], []).append(t.id)
+                for val, ids in by_val.items():
+                    super(ProductTemplate, self.browse(ids)).write({'price_notify_old_price': val})
         return res
 
     # ------------------------------------------------------------------
@@ -218,8 +235,8 @@ class ProductTemplate(models.Model):
         return all_tmpls, {k: sorted(v) for k, v in tmpl_stores.items()}
 
     def _pcd_build_attachment(self, all_tmpls, tmpl_stores, now_ist):
-        """xlsx (mümkünse) yoksa csv. Tüm ürünlerin düz listesi."""
-        headers = ['Kod', 'Ürün', 'Yeni Fiyat', 'Para Birimi', 'Stoklu Mağazalar']
+        """xlsx (mümkünse) yoksa csv. Tüm ürünlerin düz listesi (Eski + Yeni Fiyat)."""
+        headers = ['Kod', 'Ürün', 'Eski Fiyat', 'Yeni Fiyat', 'Para Birimi', 'Stoklu Mağazalar']
         stamp = now_ist.strftime('%Y%m%d_%H%M')
         try:
             import xlsxwriter
@@ -229,20 +246,27 @@ class ProductTemplate(models.Model):
             f_hdr = wb.add_format({'bold': True, 'font_color': '#FFFFFF', 'bg_color': C_PRIMARY,
                                    'border': 1, 'align': 'left', 'valign': 'vcenter'})
             f_cell = wb.add_format({'border': 1, 'valign': 'vcenter'})
-            f_price = wb.add_format({'border': 1, 'num_format': '#,##0.00', 'bold': True,
-                                     'font_color': C_PRIMARY, 'valign': 'vcenter'})
+            f_old = wb.add_format({'border': 1, 'num_format': '#,##0.00',
+                                   'font_color': C_MUTED, 'valign': 'vcenter'})
+            f_new = wb.add_format({'border': 1, 'num_format': '#,##0.00', 'bold': True,
+                                   'font_color': C_PRIMARY, 'valign': 'vcenter'})
             for c, h in enumerate(headers):
                 ws.write(0, c, h, f_hdr)
-            for c, w in enumerate([16, 52, 14, 12, 40]):
+            for c, w in enumerate([16, 52, 14, 14, 12, 40]):
                 ws.set_column(c, c, w)
             ws.set_row(0, 22)
             r = 1
             for t in all_tmpls:
+                old = t.price_notify_old_price or 0.0
                 ws.write(r, 0, t.default_code or '', f_cell)
                 ws.write(r, 1, t.name or '', f_cell)
-                ws.write(r, 2, t.list_price or 0.0, f_price)
-                ws.write(r, 3, 'TL', f_cell)
-                ws.write(r, 4, ', '.join(tmpl_stores.get(t.id, [])), f_cell)
+                if old > 0:
+                    ws.write(r, 2, old, f_old)
+                else:
+                    ws.write(r, 2, '', f_cell)
+                ws.write(r, 3, t.list_price or 0.0, f_new)
+                ws.write(r, 4, 'TL', f_cell)
+                ws.write(r, 5, ', '.join(tmpl_stores.get(t.id, [])), f_cell)
                 r += 1
             ws.freeze_panes(1, 0)
             ws.autofilter(0, 0, max(r - 1, 1), len(headers) - 1)
@@ -251,11 +275,13 @@ class ProductTemplate(models.Model):
                     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
         except Exception as e:
             _logger.warning('[FiyatDigest] xlsx üretilemedi (%s), CSV kullanılıyor.', e)
-            lines = ['Kod,Urun,Yeni Fiyat,Para Birimi,Stoklu Magazalar']
+            lines = ['Kod,Urun,Eski Fiyat,Yeni Fiyat,Para Birimi,Stoklu Magazalar']
             for t in all_tmpls:
-                lines.append('"%s","%s",%.2f,TL,"%s"' % (
+                old = t.price_notify_old_price or 0.0
+                lines.append('"%s","%s",%s,%.2f,TL,"%s"' % (
                     (t.default_code or '').replace('"', '""'),
                     (t.name or '').replace('"', '""'),
+                    ('%.2f' % old) if old > 0 else '',
                     t.list_price or 0.0,
                     ', '.join(tmpl_stores.get(t.id, [])).replace('"', '""')))
             return ('Fiyat_Degisiklikleri_%s.csv' % stamp,
@@ -309,14 +335,17 @@ class ProductTemplate(models.Model):
         rows = ''
         for idx, t in enumerate(shown):
             bg = '#ffffff' if idx % 2 == 0 else C_ZEBRA
+            old = t.price_notify_old_price or 0.0
+            old_txt = ('%.2f TL' % old) if old > 0 else '—'
             rows += (
                 '<tr style="background:%s;">'
                 '<td style="padding:8px 10px;border-bottom:1px solid %s;font-size:12px;color:%s;white-space:nowrap;">%s</td>'
                 '<td style="padding:8px 10px;border-bottom:1px solid %s;font-size:13px;">%s</td>'
+                '<td style="padding:8px 10px;border-bottom:1px solid %s;text-align:right;color:%s;white-space:nowrap;text-decoration:line-through;">%s</td>'
                 '<td style="padding:8px 10px;border-bottom:1px solid %s;text-align:right;font-weight:bold;color:%s;white-space:nowrap;">%.2f TL</td>'
                 '</tr>'
             ) % (bg, C_BORDER, C_MUTED, _esc(t.default_code), C_BORDER, _esc(t.name),
-                 C_BORDER, C_PRIMARY, t.list_price or 0.0)
+                 C_BORDER, C_MUTED, old_txt, C_BORDER, C_PRIMARY, t.list_price or 0.0)
         remaining_html = ''
         if remaining > 0:
             remaining_html = (
@@ -348,6 +377,7 @@ class ProductTemplate(models.Model):
             '<thead><tr style="background:%s;">'
             '<th style="padding:10px;text-align:left;color:#fff;font-size:12px;">Kod</th>'
             '<th style="padding:10px;text-align:left;color:#fff;font-size:12px;">Ürün</th>'
+            '<th style="padding:10px;text-align:right;color:#fff;font-size:12px;">Eski Fiyat</th>'
             '<th style="padding:10px;text-align:right;color:#fff;font-size:12px;">Yeni Fiyat</th>'
             '</tr></thead><tbody>%s</tbody></table>%s'
             # store links
@@ -425,7 +455,7 @@ class ProductTemplate(models.Model):
         # Atomik: gönderilenler + eşik-altı bayrakları temizle; işareti ilerlet.
         below = Template.search([('price_notify_pending', '=', True),
                                  ('list_price', '<', threshold)])
-        (reported | below).write({'price_notify_pending': False})
+        (reported | below).write({'price_notify_pending': False, 'price_notify_old_price': 0.0})
         ICP.set_param(PARAM + 'last_sent_slot', slot_key)
         _logger.info('[FiyatDigest] Slot %s: %s mağaza, %s ürün, alıcı=%s',
                      slot_key, len(wh_map), len(reported), recipients)
