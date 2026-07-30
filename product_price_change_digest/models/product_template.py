@@ -384,11 +384,7 @@ class ProductTemplate(models.Model):
             '<div style="font-weight:bold;font-size:14px;color:%s;margin:22px 0 8px 0;">Mağaza Listeleri</div>'
             '<table style="border-collapse:collapse;width:100%%;border:1px solid %s;border-radius:8px;overflow:hidden;">'
             '<tbody>%s</tbody></table>'
-            # reminder
-            '<div style="margin:22px 0 6px 0;padding:12px 14px;background:%s;border-left:4px solid %s;border-radius:6px;">'
-            '<b style="color:%s;">Etiket hatırlatması:</b> <span style="color:%s;font-size:13px;">Etiketleri '
-            'Fiyat Tespit Tarihi filtresini kullanarak güncelleyiniz.</span></div>'
-            '<p style="margin:16px 0 0 0;font-size:13px;color:%s;">İyi çalışmalar.</p>'
+            '<p style="margin:22px 0 0 0;font-size:13px;color:%s;">İyi çalışmalar.</p>'
             '</div>'
             '<div style="padding:14px 28px;background:#fafafa;border-top:1px solid %s;font-size:11px;color:%s;">'
             'Bu e-posta Zuhal Müzik fiyat değişim bildirim sistemi tarafından otomatik gönderilmiştir.</div>'
@@ -398,7 +394,7 @@ class ProductTemplate(models.Model):
             C_DARK, C_MUTED, C_PRIMARY, total, C_PRIMARY, len(wh_map),
             C_DARK, C_BORDER, C_PRIMARY, rows, remaining_html,
             C_DARK, C_BORDER, links_html,
-            C_SOFT, C_PRIMARY, C_PRIMARY, C_DARK, C_MUTED,
+            C_MUTED,
             C_BORDER, C_MUTED,
         )
 

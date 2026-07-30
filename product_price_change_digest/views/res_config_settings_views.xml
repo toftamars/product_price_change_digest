@@ -1,115 +1,53 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
-    <record id="res_config_settings_view_form_pcd" model="ir.ui.view">
-        <field name="name">res.config.settings.form.pcd</field>
-        <field name="model">res.config.settings</field>
-        <field name="inherit_id" ref="base.res_config_settings_view_form"/>
+    <record id="view_pcd_config_form" model="ir.ui.view">
+        <field name="name">product.price.change.digest.config.form</field>
+        <field name="model">product.price.change.digest.config</field>
         <field name="arch" type="xml">
-            <xpath expr="//div[hasclass('settings')]" position="inside">
-                <div class="app_settings_block" data-string="Fiyat Değişim Bildirimi"
-                     string="Fiyat Değişim Bildirimi" data-key="product_price_change_digest">
-                    <h2>Fiyat Değişim Bildirimi</h2>
-                    <div class="row mt16 o_settings_container">
-                        <div class="col-12 col-lg-6 o_setting_box">
-                            <div class="o_setting_right_pane">
-                                <label for="pcd_enabled"/>
-                                <div class="text-muted">Bildirim sistemini aç/kapat.</div>
-                                <field name="pcd_enabled"/>
-                            </div>
-                        </div>
-                        <div class="col-12 col-lg-6 o_setting_box">
-                            <div class="o_setting_right_pane">
-                                <label for="pcd_allow_real_send"/>
-                                <div class="text-muted">Gerçek listeye göndermek için "Evet" (test alıcısı boş iken).</div>
-                                <field name="pcd_allow_real_send"/>
-                            </div>
-                        </div>
+            <form string="Fiyat Değişim Bildirimi Ayarları">
+                <header>
+                    <button name="action_save" type="object" string="Kaydet" class="btn-primary"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <h1>Fiyat Değişim Bildirimi</h1>
                     </div>
-                    <div class="row mt16 o_settings_container">
-                        <div class="col-12 o_setting_box">
-                            <div class="o_setting_right_pane">
-                                <label for="pcd_slots"/>
-                                <div class="text-muted">TR saati, virgülle. Örn: 11:00,15:00,18:00,21:00</div>
-                                <field name="pcd_slots"/>
-                            </div>
-                        </div>
-                        <div class="col-12 col-lg-6 o_setting_box">
-                            <div class="o_setting_right_pane">
-                                <label for="pcd_window_min"/>
-                                <div class="text-muted">Slot penceresi (dakika).</div>
-                                <field name="pcd_window_min"/>
-                            </div>
-                        </div>
-                        <div class="col-12 col-lg-6 o_setting_box">
-                            <div class="o_setting_right_pane">
-                                <label for="pcd_tz"/>
-                                <field name="pcd_tz"/>
-                            </div>
-                        </div>
+                    <group>
+                        <group string="Genel">
+                            <field name="enabled"/>
+                            <field name="allow_real_send"/>
+                            <field name="slots"/>
+                            <field name="window_min"/>
+                            <field name="tz"/>
+                        </group>
+                        <group string="Alıcılar">
+                            <field name="test_recipient"/>
+                            <field name="sender"/>
+                            <field name="recipients"/>
+                        </group>
+                        <group string="İçerik / Filtre">
+                            <field name="price_threshold"/>
+                            <field name="display_limit"/>
+                            <field name="excluded_warehouses"/>
+                        </group>
+                        <group string="Bakım">
+                            <field name="cleanup_retention_days"/>
+                        </group>
+                    </group>
+                    <div class="text-muted" style="margin-top:10px;">
+                        Not: "Test Alıcısı" dolu ise mail SADECE oraya gider. Gerçek listeye göndermek için
+                        Test Alıcısı boş + Gerçek Gönderim "Evet" + Bildirim Sistemi "Açık" olmalı.
                     </div>
-                    <div class="row mt16 o_settings_container">
-                        <div class="col-12 o_setting_box">
-                            <div class="o_setting_right_pane">
-                                <label for="pcd_recipients"/>
-                                <div class="text-muted">Gerçek alıcılar, virgülle ayrılmış e-posta adresleri.</div>
-                                <field name="pcd_recipients"/>
-                            </div>
-                        </div>
-                        <div class="col-12 col-lg-6 o_setting_box">
-                            <div class="o_setting_right_pane">
-                                <label for="pcd_test_recipient"/>
-                                <div class="text-muted">DOLU ise mail SADECE buraya gider. Canlıda BOŞ olmalı.</div>
-                                <field name="pcd_test_recipient"/>
-                            </div>
-                        </div>
-                        <div class="col-12 col-lg-6 o_setting_box">
-                            <div class="o_setting_right_pane">
-                                <label for="pcd_sender"/>
-                                <field name="pcd_sender"/>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="row mt16 o_settings_container">
-                        <div class="col-12 col-lg-6 o_setting_box">
-                            <div class="o_setting_right_pane">
-                                <label for="pcd_price_threshold"/>
-                                <div class="text-muted">Bu tutarın altındaki ürünler bildirilmez.</div>
-                                <field name="pcd_price_threshold"/>
-                            </div>
-                        </div>
-                        <div class="col-12 col-lg-6 o_setting_box">
-                            <div class="o_setting_right_pane">
-                                <label for="pcd_display_limit"/>
-                                <div class="text-muted">Mail gövdesinde en fazla ürün (tamamı Excel'de).</div>
-                                <field name="pcd_display_limit"/>
-                            </div>
-                        </div>
-                        <div class="col-12 col-lg-6 o_setting_box">
-                            <div class="o_setting_right_pane">
-                                <label for="pcd_excluded_warehouses"/>
-                                <div class="text-muted">Hariç tutulacak depo kodları, virgülle. Örn: ARIZA</div>
-                                <field name="pcd_excluded_warehouses"/>
-                            </div>
-                        </div>
-                        <div class="col-12 col-lg-6 o_setting_box">
-                            <div class="o_setting_right_pane">
-                                <label for="pcd_cleanup_retention_days"/>
-                                <div class="text-muted">Eski link/ek kayıtları kaç gün sonra silinsin.</div>
-                                <field name="pcd_cleanup_retention_days"/>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </xpath>
+                </sheet>
+            </form>
         </field>
     </record>
 
     <record id="action_pcd_settings" model="ir.actions.act_window">
         <field name="name">Fiyat Değişim Bildirimi</field>
-        <field name="res_model">res.config.settings</field>
+        <field name="res_model">product.price.change.digest.config</field>
         <field name="view_mode">form</field>
-        <field name="target">inline</field>
-        <field name="context">{'module': 'product_price_change_digest'}</field>
+        <field name="target">new</field>
     </record>
 
     <menuitem id="menu_pcd_settings_root"
