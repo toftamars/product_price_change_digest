@@ -246,8 +246,19 @@ class ProductTemplate(models.Model):
 
     def _pcd_build_attachment(self, all_tmpls, tmpl_stores, now_ist):
         """xlsx (mümkünse) yoksa csv. Tüm ürünlerin düz listesi (Eski + Yeni Fiyat)."""
-        headers = ['Kod', 'Ürün', 'Eski Fiyat', 'Yeni Fiyat', 'Para Birimi', 'Stoklu Mağazalar']
+        headers = ['Kod', 'Ürün', 'Eski Fiyat', 'Yeni Fiyat', 'Para Birimi', 'Paket Adedi', 'Stoklu Mağazalar']
         stamp = now_ist.strftime('%Y%m%d_%H%M')
+
+        def _pack_text(t):
+            parts = []
+            for p in t.packaging_ids:
+                try:
+                    q = p.qty or 0.0
+                    qs = ('%g' % q) if q else ''
+                    parts.append(('%s (%s)' % (p.name or '', qs)).strip() if qs else (p.name or ''))
+                except Exception:
+                    continue
+            return ', '.join([x for x in parts if x])
         try:
             import xlsxwriter
             buf = io.BytesIO()
@@ -262,7 +273,7 @@ class ProductTemplate(models.Model):
                                    'font_color': C_PRIMARY, 'valign': 'vcenter'})
             for c, h in enumerate(headers):
                 ws.write(0, c, h, f_hdr)
-            for c, w in enumerate([16, 52, 14, 14, 12, 40]):
+            for c, w in enumerate([16, 52, 14, 14, 12, 22, 40]):
                 ws.set_column(c, c, w)
             ws.set_row(0, 22)
             r = 1
@@ -276,7 +287,8 @@ class ProductTemplate(models.Model):
                     ws.write(r, 2, '', f_cell)
                 ws.write(r, 3, t.list_price or 0.0, f_new)
                 ws.write(r, 4, 'TL', f_cell)
-                ws.write(r, 5, ', '.join(tmpl_stores.get(t.id, [])), f_cell)
+                ws.write(r, 5, _pack_text(t), f_cell)
+                ws.write(r, 6, ', '.join(tmpl_stores.get(t.id, [])), f_cell)
                 r += 1
             ws.freeze_panes(1, 0)
             ws.autofilter(0, 0, max(r - 1, 1), len(headers) - 1)
@@ -285,14 +297,15 @@ class ProductTemplate(models.Model):
                     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
         except Exception as e:
             _logger.warning('[FiyatDigest] xlsx üretilemedi (%s), CSV kullanılıyor.', e)
-            lines = ['Kod,Urun,Eski Fiyat,Yeni Fiyat,Para Birimi,Stoklu Magazalar']
+            lines = ['Kod,Urun,Eski Fiyat,Yeni Fiyat,Para Birimi,Paket Adedi,Stoklu Magazalar']
             for t in all_tmpls:
                 old = t.price_notify_old_price or 0.0
-                lines.append('"%s","%s",%s,%.2f,TL,"%s"' % (
+                lines.append('"%s","%s",%s,%.2f,TL,"%s","%s"' % (
                     (t.default_code or '').replace('"', '""'),
                     (t.name or '').replace('"', '""'),
                     ('%.2f' % old) if old > 0 else '',
                     t.list_price or 0.0,
+                    _pack_text(t).replace('"', '""'),
                     ', '.join(tmpl_stores.get(t.id, [])).replace('"', '""')))
             return ('Fiyat_Degisiklikleri_%s.csv' % stamp,
                     ('\n'.join(lines)).encode('utf-8-sig'), 'text/csv')
@@ -458,10 +471,11 @@ class ProductTemplate(models.Model):
             'email_from': sender, 'email_to': recipients,
             'attachment_ids': [(6, 0, [attachment.id])],
         })
-        # Atomik: gönderilenler + eşik-altı bayrakları temizle; işareti ilerlet.
+        # Atomik: bu turdaki TÜM pending ürünlerin bayrağını temizle; işareti ilerlet.
+        # Stoğu olmayan eligible ürünler de sırada bekletilmez (gönderilmeden düşürülür).
         below = Template.search([('price_notify_pending', '=', True),
                                  ('list_price', '<', threshold)])
-        (reported | below).write({'price_notify_pending': False, 'price_notify_old_price': 0.0})
+        (eligible | below).write({'price_notify_pending': False, 'price_notify_old_price': 0.0})
         ICP.set_param(PARAM + 'last_sent_slot', slot_key)
         _logger.info('[FiyatDigest] Slot %s: %s mağaza, %s ürün, alıcı=%s',
                      slot_key, len(wh_map), len(reported), recipients)
