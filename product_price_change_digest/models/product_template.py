@@ -473,9 +473,27 @@ class ProductTemplate(models.Model):
         })
         # Atomik: bu turdaki TÜM pending ürünlerin bayrağını temizle; işareti ilerlet.
         # Stoğu olmayan eligible ürünler de sırada bekletilmez (gönderilmeden düşürülür).
+        #
+        # NOT (v13): ORM write yerine HAM SQL kullanılıyor. Büyük kümede (ör. toplu zam,
+        # ~37.000 ürün) ORM write, kurulu diğer modüllerin write cascade'ini tetikliyordu
+        # (website_sale base_unit_count inverse -> varyant yazma -> pos_sync POS senkron).
+        # Bu ağır zincir eşzamanlı güncellemelerle çakışıp
+        # 'psycopg2 SerializationFailure: could not serialize access due to concurrent update'
+        # hatası veriyor ve TÜM transaction geri alınıyordu (mail gitmiyor, bayrak temizlenmiyor).
+        # Ham SQL yalnız iki bayrak alanını günceller, hiçbir cascade tetiklemez; hızlı ve
+        # çakışmaya çok daha dayanıklıdır. ('Fiyat Tespit Tarihi' otomasyonu da aynı yöntemi kullanır.)
         below = Template.search([('price_notify_pending', '=', True),
                                  ('list_price', '<', threshold)])
-        (eligible | below).write({'price_notify_pending': False, 'price_notify_old_price': 0.0})
+        clear_ids = (eligible | below).ids
+        if clear_ids:
+            for i in range(0, len(clear_ids), 2000):
+                chunk = clear_ids[i:i + 2000]
+                self.env.cr.execute(
+                    "UPDATE product_template SET price_notify_pending = false, "
+                    "price_notify_old_price = 0.0 WHERE id IN %s",
+                    (tuple(chunk),))
+            self.env['product.template'].browse(clear_ids).invalidate_cache(
+                ['price_notify_pending', 'price_notify_old_price'])
         ICP.set_param(PARAM + 'last_sent_slot', slot_key)
         _logger.info('[FiyatDigest] Slot %s: %s mağaza, %s ürün, alıcı=%s',
                      slot_key, len(wh_map), len(reported), recipients)
